@@ -1,0 +1,468 @@
+---
+title: "Customer Behavior Analysis for Campaign Optimization"
+date: "2024-11-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo = FALSE, include=FALSE}
+# Load necessary libraries
+library(readr)
+library(dplyr)
+library(mclust)
+library(mice)
+library(tidyr)
+library(gridExtra)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(purrr)
+library(corrplot)
+library(reshape2)
+library(ggplot2)
+library(cluster)
+library(knitr)
+library(factoextra)
+library(plotly)
+library(e1071)
+library(MASS)
+library(caret)
+library(mice)
+
+```
+
+## Introduction
+
+The **Marketing Campaign Performance Dataset** offers an in-depth look at the performance and impact of various marketing campaigns over two years, providing a solid foundation for analyzing campaign success and customer segmentation. This analysis will leverage data on company campaigns, customer engagement, ROI, and demographics to uncover trends and patterns that can inform future strategies.
+
+### Dataset Overview
+
+This dataset includes 200,000 entries, each representing a unique marketing campaign. Key columns include:
+
+-   **Company**: The fictional brand conducting the campaign.
+
+-   **Campaign_Type**: Type of campaign (e.g., email, social media, influencer).
+
+-   **Target_Audience**: Demographic targeted, such as specific age and gender groups.
+
+-   **Duration**: Length of the campaign in days.
+
+-   **Channels_Used**: Platforms where the campaign was promoted.
+
+-   **Conversion_Rate**: Percentage of impressions that converted to desired actions.
+
+-   **Acquisition_Cost**: Cost incurred for customer acquisition.
+
+-   **ROI**: Campaign profitability.
+
+-   **Location**: Cities where campaigns ran.
+
+-   **Language**: Language used in the campaign communication.
+
+-   **Clicks**: User engagement via clicks.
+
+-   **Impressions**: Total number of views.
+
+-   **Engagement_Score**: Engagement score on a 1–10 scale.
+
+-   **Customer_Segment**: Category of the targeted audience.
+
+-   **Date**: Campaign date, enabling trend analysis.
+
+With these variables, the dataset provides rich insights into audience engagement, campaign efficiency, and performance variations across customer segments and geographic areas. In the following sections, we will preprocess and analyze this data through clustering, PCA, and visualization, extracting patterns related to income segmentation, educational levels, and spending behavior.
+
+```{r ed1, echo = FALSE, include=FALSE}
+# Load and impute data
+data <- read.csv("marketing_campaign.csv", sep = ";")
+summary_table <- summary(data)
+imputed_data <- mice(data, m = 1, method = 'pmm', maxit = 5, seed = 500)
+data <- complete(imputed_data)
+head(data)
+```
+
+We are dividing the income data into three distinct segments—Low, Medium, and High—to better understand the behaviors and characteristics of individuals across different income levels. This segmentation enables us to analyze the dataset more effectively by grouping individuals based on their purchasing power.
+
+```{r ed2}
+# Segment income into three categories: Low, Medium, High
+data <- data %>%
+  mutate(Income_Segment = case_when(
+    Income < quantile(Income, 0.33) ~ "Low",
+    Income < quantile(Income, 0.66) ~ "Medium",
+    TRUE ~ "High"
+  ))
+```
+
+## Exploratory Data Analysis (EDA)
+
+```{r ed3, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Plotting the data with Income Segments -------------------------------------
+
+# Number of samples according to Education, segmented by Income
+ggplot(data, aes(x = Education, fill = Income_Segment)) +
+  geom_bar(position = "dodge") +
+  theme_minimal() +
+  labs(title = "Number of Samples According to Education, Segmented by Income")
+
+```
+
+-   The highest count of individuals appears within a specific education level, with the "High" income segment (red) as the largest, followed by "Medium" (blue) and "Low" (green).
+
+-   The "Medium" income segment has significant representation across most education levels, indicating a broad spread of medium-income individuals.
+
+-   Lower education levels have fewer individuals across all income segments, suggesting a smaller representation in these categories.
+
+-   Among the lower education levels, the "Low" income segment (green) is relatively higher, indicating a tendency toward lower income within this group.
+
+```{r ed315, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Income distribution by Education level, segmented by Income
+ggplot(data, aes(x = Education, y = Income, fill = Income_Segment)) +
+  geom_violin(alpha = 0.6) +
+  theme_minimal() +
+  labs(title = "Income Distribution by Education Level, Segmented by Income")
+```
+
+```{r ed4, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Relationship between KidHome and Income, segmented by Income
+ggplot(data, aes(x = Kidhome, y = log(Income), color = Income_Segment)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Relationship Between KidHome and Income, Segmented by Income")
+```
+
+```{r ed5, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Relationship between TeenHome and Income, segmented by Income
+ggplot(data, aes(x = Teenhome, y = log(Income), color = Income_Segment)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Relationship Between TeenHome and Income, Segmented by Income")
+```
+
+-   Income levels remain stable across different numbers of children (`KidHome`) and teenagers (`TeenHome`) at home.
+
+-   A clear income hierarchy is maintained, with "High" income consistently highest, followed by "Medium" and "Low," regardless of family size.
+
+-   The impact of family composition on income is minimal, showing similar patterns for both `KidHome` and `TeenHome`.
+
+```{r ed6, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Relationship between MntWines and NumWebVisitsMonth, segmented by Income
+ggplot(data, aes(x = MntWines, y = NumWebVisitsMonth, color = Income_Segment)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Relationship Between NumWebVisitsMonth and MntWines, Segmented by Income")
+```
+
+-   **Positive Correlation**: There is a slight positive trend between the amount spent on wine (`MntWines`) and the number of website visits per month (`NumWebVisitsMonth`) across all income segments.
+
+-   **Income-Based Patterns**: The "High" income segment (red) generally has fewer website visits per month compared to the "Medium" (blue) and "Low" (green) segments, even at higher wine expenditure levels.
+
+-   **Distinct Segmentation**: The "Low" income segment shows higher website visits for lower wine spending, while the "Medium" and "High" segments show a more gradual increase in web visits as spending on wine increases.
+
+```{r ed7, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Relationship between Income and NumStorePurchases, segmented by Income
+ggplot(data, aes(x = log(Income), y = NumStorePurchases, color = Income_Segment)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  labs(title = "Relationship Between NumStorePurchases and Income, Segmented by Income")
+```
+
+-   **Income-Based Purchase Patterns**: The number of store purchases (`NumStorePurchases`) varies significantly by income segment, with the "Low" income group (green) having fewer purchases at lower income levels, and purchases increasing as income rises.
+
+-   **Decline in Purchases for High Income**: In the "High" income segment (red), store purchases decline at higher income levels, indicating that higher-income individuals might prefer other shopping channels or purchase less frequently in-store.
+
+-   **Medium Income Segment Stability**: The "Medium" income group (blue) shows a stable and moderate number of store purchases across the income range, suggesting a consistent in-store shopping behavior among medium-income individuals.
+
+```{r ed8, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Response Rate by Education, segmented by Income ----------------------------
+
+response_education <- data %>%
+  dplyr::count(Response, Education, Income_Segment) %>%
+  group_by(Education, Income_Segment) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+ggplot(response_education, aes(x = "", y = percentage, fill = factor(Response))) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  facet_grid(Income_Segment ~ Education) +
+  theme_void() +
+  labs(title = "Response Rate by Education, Segmented by Income")
+```
+
+```{r ed9, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Total Spent for Products by Marital Status, segmented by Income ------------
+
+total_spent <- data %>%
+  group_by(Marital_Status, Income_Segment) %>%
+  summarize(across(starts_with("Mnt"), sum, na.rm = TRUE)) %>%
+  pivot_longer(cols = starts_with("Mnt"), names_to = "Product", values_to = "Total")
+
+ggplot(total_spent, aes(x = Product, y = Total, fill = Product)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ Income_Segment) +
+  theme_minimal() +
+  labs(title = "Total Spent for Products Segmented by Income")
+```
+
+All three income segments exhibit a similar purchasing distribution across product categories. However, the low-income segment spends significantly less on luxury products, such as `MntGoldProds`, compared to the medium- and high-income segments.
+
+```{r ed10, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+# Purchase Type According to Age, segmented by Income ------------------------
+
+purchase_type_age <- data %>%
+  group_by(Year_Birth, Income_Segment) %>%
+  summarize(across(c("NumWebPurchases", "NumCatalogPurchases", "NumStorePurchases"), sum, na.rm = TRUE)) %>%
+  pivot_longer(cols = c("NumWebPurchases", "NumCatalogPurchases", "NumStorePurchases"),
+               names_to = "PurchaseType", values_to = "Total")
+
+ggplot(purchase_type_age, aes(x = Year_Birth, y = Total, fill = PurchaseType)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ Income_Segment) +
+  theme_minimal() +
+  labs(title = "Number of Purchase Type According to Age, Segmented by Income")
+```
+
+1.  **Similar Purchasing Patterns Across Income Segments**:
+
+    -   All three income segments (High, Medium, Low) show a similar distribution of purchase types (catalog, store, and web purchases) across different birth years.
+
+2.  **Age-Related Trends**:
+
+    -   Younger individuals (born after 1970) across all income segments tend to have more web and store purchases, while older individuals show fewer total purchases, especially in the low-income segment.
+
+3.  **Lower Engagement in Low-Income Segment**:
+
+    -   The low-income group shows fewer total purchases across all types, particularly for catalog purchases, indicating lower overall engagement or purchasing power in this segment.
+
+```{r exp1, echo = FALSE}
+select = dplyr::select
+data <- read.csv("marketing_campaign.csv", sep = ";")
+imputed_data <- mice(data, m = 1, method = 'pmm', maxit = 5, seed = 500)
+data <- complete(imputed_data)
+
+# Convert date and extract year and month
+data$Dt_Customer <- as.Date(data$Dt_Customer, format = "%Y-%m-%d")
+data <- data %>%
+  mutate(Year = year(Dt_Customer),
+         Month = month(Dt_Customer))
+
+# Categorize age groups and segment income
+data <- data %>%
+  mutate(Age = case_when(
+    Year_Birth <= 1959 ~ "Elderly",
+    Year_Birth > 1959 & Year_Birth <= 1977 ~ "MiddleAge",
+    TRUE ~ "Young"
+  ),
+  Income_Segment = case_when(
+    Income < quantile(Income, 0.33) ~ "Low",
+    Income < quantile(Income, 0.66) ~ "Medium",
+    TRUE ~ "High"
+  ))
+
+# Remove unused columns
+data <- data %>% select(-Dt_Customer, -ID, -Z_CostContact, -Z_Revenue, -Year_Birth)
+
+# Convert specific columns to numeric
+columns_to_convert <- c("Education", "Marital_Status", "Age", "Income_Segment")
+data[columns_to_convert] <- lapply(data[columns_to_convert], function(x) as.numeric(as.factor(x)))
+
+```
+
+### PCA Inference
+
+```{r exp2, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+
+# Perform PCA and Scree plot
+data_cor <- data %>% select(-c("Education", "Marital_Status", "Age", "Year", "Income_Segment"))
+pca_result <- prcomp(data_cor, center = TRUE, scale. = TRUE)
+variance <- pca_result$sdev^2
+proportion_variance <- variance / sum(variance)
+pca_df <- data.frame(Principal_Component = seq_along(proportion_variance), Proportion_Variance = proportion_variance)
+
+ggplot(pca_df, aes(x = Principal_Component, y = Proportion_Variance)) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Scree Plot", x = "Principal Component", y = "Proportion of Variance Explained") +
+  theme_minimal()
+
+```
+
+-   The first principal component explains the most variance, followed by a sharp decline in subsequent components.
+
+-   An “elbow” is observed around the third component, suggesting that the first three components capture most of the important variance.
+
+-   Additional components contribute minimal variance, indicating they may have limited value for representing the data.
+
+### PCA Plots
+
+```{r exp3, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+pca_scores <- as.data.frame(pca_result$x[, 1:3])
+colnames(pca_scores) <- c("PC1", "PC2", "PC3")
+
+plot_pca_by_group <- function(data, group_var, u) {
+  ggplot(data, aes(x = PC1, y = PC2, color = group_var)) +
+    geom_point(alpha = 0.7) +
+    labs(title = paste("PCA Plot by", u),
+         x = "Principal Component 1",
+         y = "Principal Component 2",
+         color = group_var) +
+    theme_minimal()
+}
+
+# Create individual plots
+plot1 <- plot_pca_by_group(pca_scores, data$Education, "Education")
+plot2 <- plot_pca_by_group(pca_scores, data$Marital_Status, "Marital_Status")
+plot3 <- plot_pca_by_group(pca_scores, data$Age, "Age")
+plot4 <- plot_pca_by_group(pca_scores, data$Income_Segment, "Income_Segment")
+
+# Arrange plots in a 2x2 grid
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2, nrow = 2)
+
+```
+
+-   The PCA plots for **Education**, **Marital Status**, and **Age** show similar clustering patterns, indicating minimal separation among these categories in the principal component space.
+
+-   The **Income Segment** plot displays a more noticeable separation, with some clustering based on income level, suggesting that income may have a stronger relationship with the principal components compared to the other variables.
+
+-   This indicates that while **Income Segment** may influence the principal components to some extent, **Education**, **Marital Status**, and **Age** do not appear to contribute significantly to variance in this PCA representation.
+
+### Unsupervised Clustering
+
+**K-means Clustering**: K-means is a popular unsupervised clustering algorithm that partitions data into a pre-defined number of clusters (k). It works by initializing k centroids, then iteratively assigning data points to the nearest centroid and updating the centroid positions until convergence. The goal is to minimize the variance within clusters, resulting in compact, spherical clusters. K-means is fast and easy to interpret but assumes clusters of similar size and shape.
+
+```{r exp6, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+
+# Elbow method for optimal clusters
+wss <- sapply(1:10, function(k) kmeans(data_cor, centers = k, nstart = 25)$tot.withinss)
+elbow_plot <- data.frame(Clusters = 1:10, WSS = wss)
+ggplot(elbow_plot, aes(x = Clusters, y = WSS)) +
+  geom_point() +
+  geom_line() +
+  labs(title = "Elbow Method for Optimal Number of Clusters", x = "Number of Clusters", y = "Within-cluster Sum of Squares")
+
+
+```
+
+```{r exp7, echo = FALSE, fig.align = 'center', fig.width = 6, fig.height = 5}
+
+optimal_k <- 3
+
+gmm_result <- Mclust(as.data.frame(pca_result$x[, 1:5]), G = 3)
+data$GMM_Cluster <- factor(gmm_result$classification)
+
+kmeans_result <- kmeans(as.data.frame(pca_result$x[, 1:3]), centers = optimal_k, nstart = 25)
+data$Cluster <- factor(kmeans_result$cluster)
+
+# 2D PCA plot with clusters
+pca_scores <- as.data.frame(pca_result$x[, 1:3])
+colnames(pca_scores) <- c("PC1", "PC2", "PC3")
+pca_scores$Cluster <- data$Cluster
+
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "K-means Clustering (k = 3) Visualized on PCA Components", x = "Principal Component 1", y = "Principal Component 2") +
+  theme_minimal()
+
+
+```
+
+**Gaussian Mixture Model (GMM)**: GMM is a probabilistic clustering method that models the data as a mixture of several Gaussian distributions. Unlike K-means, GMM allows for clusters of different shapes, sizes, and orientations. Each data point is assigned a probability of belonging to each cluster, rather than a hard assignment. GMM uses the Expectation-Maximization (EM) algorithm to iteratively optimize the parameters. It is more flexible than K-means but can be more complex and computationally intensive.
+
+```{r exp15, echo = TRUE}
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = data$GMM_Cluster)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "GMM Clustering (k = 3) Visualized on PCA Components", x = "Principal Component 1", y = "Principal Component 2") +
+  theme_minimal()
+```
+\newpage
+kmeans results
+
+```{r exp8, echo = TRUE}
+contingency_tables <- lapply(columns_to_convert, function(var) table(data[[var]], data$Cluster))
+names(contingency_tables) <- columns_to_convert
+contingency_tables
+
+```
+\newpage
+gmm results
+
+```{r exp16, echo=TRUE}
+contingency_tables <- lapply(columns_to_convert, function(var) table(data[[var]], data$GMM_Cluster))
+names(contingency_tables) <- columns_to_convert
+contingency_tables
+
+```
+
+By these results we can verify that by simply clustering we arent able to get any of the segement properly.
+
+### Discriminant Analysis and Bayesian Classification
+
+**Linear Discriminant Analysis (LDA)**: LDA is a classification technique that assumes classes have a Gaussian distribution with the same covariance matrix but different means. It projects data onto a lower-dimensional space where the separation between classes is maximized. LDA is effective when class distributions are approximately linear and is often used in cases where the goal is to reduce dimensionality while preserving class separability.
+
+**Quadratic Discriminant Analysis (QDA)**: QDA is similar to LDA but allows each class to have its own covariance matrix, which enables it to capture non-linear decision boundaries between classes. This makes QDA more flexible than LDA, particularly for complex datasets, but it requires more data to estimate the individual covariance matrices accurately.
+
+**Naive Bayes Classifier**: The Naive Bayes classifier is a probabilistic model based on Bayes’ theorem, assuming that features are independent given the class label (hence "naive"). It calculates the probability of each class given the input features and assigns the class with the highest probability. Naive Bayes is simple, fast, and effective, especially for text classification, but its independence assumption may limit its performance on datasets with correlated features.
+
+```{r exp9, echo=FALSE}
+
+class_vars <- c("Education", "Marital_Status", "Age", "Year", "Income_Segment")
+
+results <- data.frame(
+  Class_Variable = character(),
+  Model = character(),
+  Misclassification_Rate = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Evaluate LDA, QDA, and Naive Bayes for each class variable
+for (class_var in class_vars) {
+
+  set.seed(123)
+  trainIndex <- createDataPartition(data[[class_var]], p = 0.9, list = FALSE)
+  train_data <- data[trainIndex, ]
+  test_data <- data[-trainIndex, ]
+
+  # LDA
+  lda_model <- lda(as.formula(paste(class_var, "~ .")), data = train_data)
+  lda_pred <- predict(lda_model, test_data)$class
+  lda_misclassification_rate <- mean(lda_pred != test_data[[class_var]])
+  results <- rbind(results, data.frame(Class_Variable = class_var, Model = "LDA", Misclassification_Rate = lda_misclassification_rate))
+
+  # QDA
+  qda_model <- tryCatch({
+    qda(as.formula(paste(class_var, "~ .")), data = train_data)
+  }, error = function(e) NULL)
+  if (!is.null(qda_model)) {
+    qda_pred <- predict(qda_model, test_data)$class
+    qda_misclassification_rate <- mean(qda_pred != test_data[[class_var]])
+    results <- rbind(results, data.frame(Class_Variable = class_var, Model = "QDA", Misclassification_Rate = qda_misclassification_rate))
+  } else {
+    results <- rbind(results, data.frame(Class_Variable = class_var, Model = "QDA", Misclassification_Rate = NA))
+  }
+
+  # Naive Bayes
+  nb_model <- naiveBayes(as.formula(paste(class_var, "~ .")), data = train_data)
+  nb_pred <- predict(nb_model, test_data)
+  nb_misclassification_rate <- mean(nb_pred != test_data[[class_var]])
+  results <- rbind(results, data.frame(Class_Variable = class_var, Model = "Naive Bayes", Misclassification_Rate = nb_misclassification_rate))
+}
+
+# Display the misclassification results
+kable(results)
+
+```
+
+LDA works best on this dataset as it captures the main patterns and provides clear decision boundaries between classes.
+
+## Future Work
+
+-   We plan to apply **association rule mining** to uncover hidden patterns and relationships within the dataset, which can provide valuable insights into frequently co-occurring features and behaviors.
+
+-   We intend to explore various **neural network architectures** and other advanced machine learning models to evaluate whether they can achieve better classification results than traditional methods.
+
+-   We will conduct a comparative analysis across multiple models, examining not only their accuracy but also the correlation in their predictions, to assess whether complex models align with the simpler models currently in use.
